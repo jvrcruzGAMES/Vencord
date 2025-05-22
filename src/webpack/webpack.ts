@@ -20,6 +20,7 @@ import { makeLazy, proxyLazy } from "@utils/lazy";
 import { LazyComponent } from "@utils/lazyReact";
 import { Logger } from "@utils/Logger";
 import { canonicalizeMatch } from "@utils/patches";
+import { FluxStore } from "@webpack/types";
 
 import { traceFunction } from "../debug/Tracer";
 import { Flux } from "./common";
@@ -36,6 +37,8 @@ export const onceReady = new Promise<void>(r => _resolveReady = r);
 
 export let wreq: WebpackRequire;
 export let cache: WebpackRequire["c"];
+
+export const fluxStores: Record<string, FluxStore> = {};
 
 export type FilterFn = (mod: any) => boolean;
 
@@ -131,7 +134,7 @@ function shouldIgnoreValue(value: any) {
     return false;
 }
 
-function makePropertyNonEnumerable(target: Object, key: PropertyKey) {
+function makePropertyNonEnumerable(target: Record<PropertyKey, any>, key: PropertyKey) {
     const descriptor = Object.getOwnPropertyDescriptor(target, key);
     if (descriptor == null) return;
 
@@ -142,9 +145,17 @@ function makePropertyNonEnumerable(target: Object, key: PropertyKey) {
 }
 
 export function _blacklistBadModules(requireCache: NonNullable<AnyWebpackRequire["c"]>, exports: ModuleExports, moduleId: PropertyKey) {
-    if (shouldIgnoreValue(exports)) {
-        makePropertyNonEnumerable(requireCache, moduleId);
-        return true;
+    try {
+        if (shouldIgnoreValue(exports)) {
+            makePropertyNonEnumerable(requireCache, moduleId);
+            return true;
+        }
+    } catch (err) {
+        logger.error(
+            "Error while blacklisting module:\n", err,
+            "\n\nModule id:", moduleId,
+            "\n\nModule exports:", exports,
+        );
     }
 
     if (typeof exports !== "object") {
@@ -153,10 +164,25 @@ export function _blacklistBadModules(requireCache: NonNullable<AnyWebpackRequire
 
     let hasOnlyBadProperties = true;
     for (const exportKey in exports) {
-        if (shouldIgnoreValue(exports[exportKey])) {
-            makePropertyNonEnumerable(exports, exportKey);
-        } else {
-            hasOnlyBadProperties = false;
+        try {
+            // Some exports might have not been initialized yet due to circular imports, so try catch it.
+            try {
+                var exportValue = exports[exportKey];
+            } catch {
+                continue;
+            }
+
+            if (shouldIgnoreValue(exportValue)) {
+                makePropertyNonEnumerable(exports, exportKey);
+            } else {
+                hasOnlyBadProperties = false;
+            }
+        } catch (err) {
+            logger.error(
+                "Error while blacklistng module:\n", err,
+                "\n\nModule id:", moduleId,
+                "\n\nExport value:", exportValue,
+            );
         }
     }
 
@@ -428,9 +454,47 @@ export function findByCodeLazy(...code: CodeFilter) {
  * Find a store by its displayName
  */
 export function findStore(name: StoreNameFilter) {
-    const res = Flux.Store.getAll
-        ? Flux.Store.getAll().find(filters.byStoreName(name))
-        : find(filters.byStoreName(name), { isIndirect: true });
+    let res = fluxStores[name] as any;
+    if (res == null) {
+        for (const store of Flux.Store.getAll?.() ?? []) {
+            const storeName = store.getName();
+
+            if (storeName === name) {
+                res = store;
+            }
+
+            if (fluxStores[storeName] == null) {
+                fluxStores[storeName] = store;
+            }
+        }
+
+        try {
+            const getLibdiscore = findByCode("libdiscoreWasm is not initialized");
+            const libdiscoreExports = getLibdiscore();
+
+            for (const libdiscoreExportName in libdiscoreExports) {
+                if (!libdiscoreExportName.endsWith("Store")) {
+                    continue;
+                }
+
+                const storeName = libdiscoreExportName;
+                const store = libdiscoreExports[storeName];
+
+                if (storeName === name) {
+                    res = store;
+                }
+
+                if (fluxStores[storeName] == null) {
+                    fluxStores[storeName] = store;
+                }
+            }
+
+        } catch { }
+
+        if (res == null) {
+            res = find(filters.byStoreName(name), { isIndirect: true });
+        }
+    }
 
     if (!res)
         handleModuleNotFound("findStore", name);
@@ -499,12 +563,12 @@ export function findExportedComponentLazy<T extends object = any>(...props: Prop
     });
 }
 
-function getAllPropertyNames(object: Object, includeNonEnumerable: boolean) {
+function getAllPropertyNames(object: Record<PropertyKey, any>, includeNonEnumerable: boolean) {
     const names = new Set<PropertyKey>();
 
     const getKeys = includeNonEnumerable ? Object.getOwnPropertyNames : Object.keys;
     do {
-        getKeys(object).forEach(name => names.add(name));
+        getKeys(object).forEach(name => name !== "__esModule" && names.add(name));
         object = Object.getPrototypeOf(object);
     } while (object != null);
 
@@ -710,7 +774,7 @@ export function extract(id: string | number) {
 //          This module is NOT ACTUALLY USED! This means putting breakpoints will have NO EFFECT!!
 
 0,${mod.toString()}
-//# sourceURL=ExtractedWebpackModule${id}
+//# sourceURL=file:///ExtractedWebpackModule${id}
 `;
     const extracted = (0, eval)(code);
     return extracted as Function;
