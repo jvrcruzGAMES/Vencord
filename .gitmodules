@@ -1,9 +1,6 @@
 [submodule "src/userplugins/GlobalBadges"]
 	path = src/userplugins/GlobalBadges
 	url = https://github.com/Domis-Vencord-Plugins/GlobalBadges.git
-[submodule "src/userplugins/ThemeLibrary"]
-	path = src/userplugins/ThemeLibrary
-	url = https://github.com/Faf4a/ThemeLibrary.git
 [submodule "src/userplugins/vc-spotifylyrics"]
 	path = src/userplugins/vc-spotifylyrics
 	url = https://github.com/Masterjoona/vc-spotifylyrics.git
