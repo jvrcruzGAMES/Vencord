@@ -10,3 +10,6 @@
 [submodule "src/userplugins/bigFileUpload"]
 	path = src/userplugins/bigFileUpload
 	url = https://github.com/ScattrdBlade/bigFileUpload.git
+[submodule "src/userplugins/HolyNotes-VC"]
+	path = src/userplugins/HolyNotes-VC
+	url = https://github.com/WolfPlugs/HolyNotes-VC.git
